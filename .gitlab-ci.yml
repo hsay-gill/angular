@@ -1,0 +1,83 @@
+variables:
+  ENVIRONMENT_NAME: 'npe'
+  DEPLOY_ENV: 'sft'
+  NAME: 'OV_CONTAINER'
+  NPE_GOOGLE_CLOUD_PROJECT: 'prj-it-npe-wireless-dev1-01'
+  NPE_GAR_REPOSITORY_NAME: ' oneview-application-docker' #'adhoc-vista'
+  IMAGE_NM: 'oneviewretail'
+  WIDGET_IMAGE: 'northamerica-northeast1-docker.pkg.dev/prj-it-npe-wireless-dev1-01/oneview-application-docker/oneviewretail'
+  IMAGE: 'northamerica-northeast1-docker.pkg.dev/${NPE_GOOGLE_CLOUD_PROJECT}/${NPE_GAR_REPOSITORY_NAME}/${IMAGE_NM}:${IMAGE_TAG}'
+  NAMESPACE:
+    description: 'The namespace to target for either deletion or creation. If this field is not populated then the namespace will be taken from the infra config file..'
+
+stages:
+   - set-merge-request-approvers
+   - npm-install-stage
+   - npm-build-stage
+#   - docker-build-push-image-stage
+#   - terraform-bootstrap-stage
+#   - terraform-deploy-stage
+#   - cleanup_build
+#   - test
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+
+cache:
+  - key:
+      files:
+        - package-lock.json
+    paths:
+      - node_modules/
+      - .npm/
+    policy: pull
+
+before_script:
+  - |-
+    if [[ -n "$NAMESPACE" ]]; then
+      export NEW_NAMESPACE=$NAMESPACE
+      sed -i "s/^namespace.*$/namespace: $NAMESPACE/g" ./infrastructure/orchestration/config-${ENVIRONMENT_NAME}.yaml
+      echo "Namespace is decided by pipeline: $NEW_NAMESPACE"
+    else
+      export NEW_NAMESPACE=$(awk '/namespace:/{print $2}' ./infrastructure/orchestration/config-${ENVIRONMENT_NAME}.yaml)
+      echo "Namespace is decided by the config file: $NEW_NAMESPACE"
+    fi
+  # - cat ./infrastructure/orchestration/config-${ENVIRONMENT_NAME}.yaml | grep namespace
+
+auto-assign-merge-request-job:
+ stage: set-merge-request-approvers
+ script:
+    - |
+      echo "Adding code owners to the reviewers list"
+      curl -X PUT -H "Content-Type: application/json" --data '{ "reviewer_ids": '${RELEASE_REVIEWERS}' }' https://gitlab.int.bell.ca/api/v4/projects/${PROJECTID}/merge_requests/${CI_MERGE_REQUEST_IID}?private_token=${APITOKEN}
+
+
+npm-install-job:
+  stage: npm-install-stage
+  cache:
+    - key:
+        files:
+          - package-lock.json
+      paths:
+        - node_modules/
+        - .npm/
+      when: on_success
+      policy: pull-push        
+  script:
+    - npm ci --cache .npm --prefer-offline
+  tags:
+    - oneview
+
+npm-dev-build-job:
+  stage: npm-build-stage
+  allow_failure: false
+  before_script:
+    - dir 
+  script:
+    - echo "Begin npm build..."
+    - npm run build  
+  tags:
+    - oneview
+  needs:
+    - job: npm-install-job  
